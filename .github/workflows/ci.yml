@@ -1,0 +1,63 @@
+name: Test and publish Docker image
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./dockerfile
+          load: true
+          push: false
+          tags: montalvoalan/telco-fastapi:test
+
+      - name: Test container health and prediction
+        shell: bash
+        run: |
+          docker run --detach --name telco-fastapi-test --publish 8000:8000 montalvoalan/telco-fastapi:test
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/ > /dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs telco-fastapi-test
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent \
+            --header "Content-Type: application/json" \
+            --data '{"gender":"Male","SeniorCitizen":0,"Partner":"Yes","Dependents":"No","tenure":5,"PhoneService":"Yes","MultipleLines":"No","InternetService":"Fiber optic","OnlineSecurity":"No","OnlineBackup":"Yes","DeviceProtection":"No","TechSupport":"No","StreamingTV":"Yes","StreamingMovies":"Yes","Contract":"Month-to-month","PaperlessBilling":"Yes","PaymentMethod":"Electronic check","MonthlyCharges":70.35,"TotalCharges":350.75}' \
+            http://127.0.0.1:8000/predict | grep --quiet 'prediction'
+
+      - name: Stop test container
+        if: always()
+        run: docker rm --force telco-fastapi-test || true
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Publish tested image
+        run: |
+          docker tag montalvoalan/telco-fastapi:test montalvoalan/telco-fastapi:${GITHUB_SHA}
+          docker tag montalvoalan/telco-fastapi:test montalvoalan/telco-fastapi:latest
+          docker push montalvoalan/telco-fastapi:${GITHUB_SHA}
+          docker push montalvoalan/telco-fastapi:latest

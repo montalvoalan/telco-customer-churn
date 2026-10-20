@@ -1,0 +1,10 @@
+data/
+notebooks/
+.venv/
+.git/
+__pycache__/
+mlruns/
+mlflow.db
+artifacts/
+tests/
+CODEX.md
